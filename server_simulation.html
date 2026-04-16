@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C++ Web Server — Live Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#080b0f;--panel:#0d1117;--border:#1c2430;--accent:#00e5ff;--green:#00ff88;--orange:#ff9500;--red:#ff3b55;--yellow:#ffe234;--dim:#3a4a5c;--text:#c8d6e5;--subtext:#5a7080;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px;min-height:100vh;overflow-x:hidden;}
+  body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);pointer-events:none;z-index:9999;}
+  body::after{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+  header{position:relative;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:18px 32px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,#0d1117,#0a0f15);}
+  .logo{display:flex;align-items:center;gap:14px;}
+  .logo-icon{width:36px;height:36px;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--accent);clip-path:polygon(8px 0%,100% 0%,100% calc(100% - 8px),calc(100% - 8px) 100%,0% 100%,0% 8px);}
+  .logo h1{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;color:#fff;text-transform:uppercase;}
+  .logo span{font-size:11px;color:var(--subtext);letter-spacing:1px;}
+  .header-right{display:flex;gap:20px;align-items:center;}
+  .status-pill{display:flex;align-items:center;gap:7px;padding:6px 14px;border:1px solid var(--border);font-size:11px;letter-spacing:1px;}
+  .status-pill.connected{background:rgba(0,255,136,.04);color:var(--green);border-color:rgba(0,255,136,.3);}
+  .status-pill.disconnected{background:rgba(255,59,85,.04);color:var(--red);border-color:rgba(255,59,85,.3);}
+  .status-pill.connecting{background:rgba(255,149,0,.04);color:var(--orange);border-color:rgba(255,149,0,.3);}
+  .dot{width:7px;height:7px;border-radius:50%;}
+  .connected .dot{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite;}
+  .disconnected .dot{background:var(--red);}
+  .connecting .dot{background:var(--orange);animation:pulse .7s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .uptime{font-size:11px;color:var(--subtext);}
+  .uptime span{color:var(--accent);}
+  #connBanner{position:relative;z-index:10;background:rgba(255,149,0,.08);border-bottom:1px solid rgba(255,149,0,.2);padding:10px 32px;font-size:11px;color:var(--orange);letter-spacing:.5px;display:flex;align-items:center;gap:10px;}
+  #connBanner.hidden{display:none;}
+  #connBanner code{background:rgba(255,149,0,.15);padding:2px 8px;font-family:inherit;}
+  .layout{position:relative;z-index:10;display:grid;grid-template-columns:280px 1fr 320px;grid-template-rows:auto 1fr auto;gap:1px;background:var(--border);min-height:calc(100vh - 120px);}
+  .panel{background:var(--panel);padding:20px;overflow:hidden;}
+  .panel-title{font-size:10px;letter-spacing:2px;color:var(--subtext);text-transform:uppercase;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
+  .badge{font-size:9px;padding:2px 7px;background:rgba(0,229,255,.1);border:1px solid rgba(0,229,255,.2);color:var(--accent);}
+  .badge.live{background:rgba(0,255,136,.1);border-color:rgba(0,255,136,.2);color:var(--green);}
+  .badge.offline{background:rgba(255,59,85,.1);border-color:rgba(255,59,85,.2);color:var(--red);}
+  .thread-panel{grid-row:1/3;}
+  .threads-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px;}
+  .thread-cell{aspect-ratio:1;border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:9px;color:var(--subtext);position:relative;overflow:hidden;transition:border-color .2s,background .2s;}
+  .thread-cell .tid{font-size:10px;font-weight:600;color:var(--dim);}
+  .thread-cell .tstate{font-size:8px;letter-spacing:1px;}
+  .thread-cell .tpath{font-size:7px;color:var(--subtext);max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .thread-cell.idle{border-color:var(--border);}
+  .thread-cell.busy{border-color:var(--accent);background:rgba(0,229,255,.05);}
+  .thread-cell.busy .tid{color:var(--accent);}
+  .thread-cell.busy .tstate{color:var(--accent);}
+  .thread-cell .progress-bar{position:absolute;bottom:0;left:0;height:2px;background:var(--accent);transition:width .3s linear;}
+  .thread-cell .spark{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(0,229,255,.2),transparent 70%);opacity:0;transition:opacity .2s;}
+  .thread-cell.busy .spark{opacity:1;animation:spark 1s infinite;}
+  @keyframes spark{0%,100%{opacity:.4}50%{opacity:.9}}
+  .queue-vis{border:1px solid var(--border);padding:12px;margin-bottom:16px;}
+  .queue-label{font-size:9px;letter-spacing:1px;color:var(--subtext);text-transform:uppercase;margin-bottom:8px;display:flex;justify-content:space-between;}
+  .queue-slots{display:flex;gap:4px;flex-wrap:wrap;}
+  .queue-slot{width:14px;height:14px;border:1px solid var(--border);transition:background .15s,border-color .15s;}
+  .queue-slot.filled{background:var(--yellow);border-color:var(--yellow);box-shadow:0 0 6px rgba(255,226,52,.4);}
+  .thread-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .tstat{border:1px solid var(--border);padding:10px;text-align:center;}
+  .tstat .val{font-size:22px;font-weight:700;font-family:'Syne',sans-serif;color:var(--accent);line-height:1;margin-bottom:4px;}
+  .tstat .lbl{font-size:9px;color:var(--subtext);letter-spacing:1px;}
+  .chart-wrap{position:relative;height:120px;border:1px solid var(--border);overflow:hidden;margin-bottom:16px;}
+  #trafficCanvas{display:block;width:100%;height:100%;}
+  .chart-legend{display:flex;gap:16px;margin-bottom:16px;}
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--subtext);}
+  .legend-dot{width:8px;height:2px;}
+  .flow-stages{display:flex;align-items:center;gap:0;margin-bottom:16px;overflow:hidden;}
+  .stage{flex:1;padding:12px 8px;text-align:center;border:1px solid var(--border);border-right:none;position:relative;background:var(--bg);transition:background .2s,border-color .2s;}
+  .stage:last-child{border-right:1px solid var(--border);}
+  .stage::after{content:'▶';position:absolute;right:-10px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--border);z-index:2;}
+  .stage:last-child::after{display:none;}
+  .stage.active{background:rgba(0,229,255,.06);border-color:var(--accent);}
+  .stage-name{font-size:9px;letter-spacing:1px;color:var(--subtext);text-transform:uppercase;}
+  .stage-count{font-size:18px;font-weight:700;color:var(--accent);font-family:'Syne',sans-serif;}
+  .packet-lane{height:28px;position:relative;border:1px solid var(--border);overflow:hidden;margin-bottom:8px;background:var(--bg);}
+  .packet{position:absolute;top:50%;transform:translateY(-50%);height:10px;border-radius:2px;font-size:7px;letter-spacing:1px;display:flex;align-items:center;padding:0 6px;white-space:nowrap;font-weight:600;animation:travel linear forwards;}
+  .packet.get{background:rgba(0,229,255,.2);color:var(--accent);border:1px solid rgba(0,229,255,.4);}
+  .packet.post{background:rgba(0,255,136,.2);color:var(--green);border:1px solid rgba(0,255,136,.4);}
+  .packet.err{background:rgba(255,59,85,.2);color:var(--red);border:1px solid rgba(255,59,85,.4);}
+  .packet.auth{background:rgba(255,149,0,.2);color:var(--orange);border:1px solid rgba(255,149,0,.4);}
+  @keyframes travel{from{left:-120px;opacity:0}5%{opacity:1}95%{opacity:1}to{left:110%;opacity:0}}
+  .gateway-panel{grid-row:1/3;}
+  .gauge-wrap{margin-bottom:20px;}
+  .gauge-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .gauge-label{font-size:10px;color:var(--subtext);width:80px;flex-shrink:0;}
+  .gauge-bar{flex:1;height:6px;background:var(--border);position:relative;overflow:hidden;}
+  .gauge-fill{height:100%;transition:width .5s ease;}
+  .gauge-val{font-size:10px;color:var(--text);width:44px;text-align:right;flex-shrink:0;}
+  .rate-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px;}
+  .rate-card{border:1px solid var(--border);padding:12px;text-align:center;}
+  .rate-card .num{font-size:24px;font-weight:800;font-family:'Syne',sans-serif;line-height:1;margin-bottom:4px;}
+  .rate-card .unit{font-size:9px;color:var(--subtext);letter-spacing:1px;}
+  .rate-card.ok .num{color:var(--green);}
+  .rate-card.crit .num{color:var(--red);}
+  .rate-card.warn .num{color:var(--orange);}
+  .rate-card.info .num{color:var(--accent);}
+  .ip-table{width:100%;border-collapse:collapse;}
+  .ip-table th{font-size:9px;letter-spacing:1px;color:var(--subtext);text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);text-transform:uppercase;}
+  .ip-table td{font-size:10px;padding:5px 6px;border-bottom:1px solid rgba(28,36,48,.5);}
+  .ip-status{display:inline-block;width:6px;height:6px;border-radius:50%;}
+  .ip-status.ok{background:var(--green);}
+  .ip-status.rl,.ip-status.err{background:var(--red);}
+  .ip-status.auth{background:var(--orange);}
+  .log-panel{grid-column:1/3;max-height:200px;}
+  .log-scroll{height:140px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
+  .log-scroll::-webkit-scrollbar{width:4px;}
+  .log-scroll::-webkit-scrollbar-thumb{background:var(--border);}
+  .log-entry{display:flex;gap:12px;padding:3px 0;border-bottom:1px solid rgba(28,36,48,.4);animation:logfade .3s ease;}
+  @keyframes logfade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .log-time{color:var(--dim);flex-shrink:0;width:80px;}
+  .log-level{flex-shrink:0;width:38px;font-weight:600;}
+  .log-level.info{color:var(--accent);}
+  .log-level.warn{color:var(--orange);}
+  .log-level.error{color:var(--red);}
+  .log-level.ok{color:var(--green);}
+  .log-msg{color:var(--text);}
+  .controls{position:relative;z-index:10;display:flex;gap:12px;align-items:center;padding:14px 32px;border-top:1px solid var(--border);background:var(--panel);flex-wrap:wrap;}
+  .ctrl-label{font-size:10px;color:var(--subtext);letter-spacing:1px;margin-right:4px;}
+  .btn{padding:8px 18px;border:1px solid var(--border);background:transparent;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;transition:all .15s;clip-path:polygon(6px 0%,100% 0%,100% calc(100% - 6px),calc(100% - 6px) 100%,0% 100%,0% 6px);}
+  .btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(0,229,255,.05);}
+  .btn.danger{border-color:var(--red);color:var(--red);}
+  .btn.danger:hover{background:rgba(255,59,85,.08);}
+  .sep{width:1px;height:24px;background:var(--border);}
+  ::-webkit-scrollbar{width:6px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div><h1>CppServer</h1><span>Multithreaded Web Server · Live Dashboard</span></div>
+  </div>
+  <div class="header-right">
+    <div class="uptime">Uptime: <span id="uptimeVal">--:--:--</span></div>
+    <div class="status-pill connecting" id="statusPill">
+      <div class="dot"></div><span id="statusText">CONNECTING…</span>
+    </div>
+  </div>
+</header>
+
+<div id="connBanner">
+  ⚠ Cannot reach server. Run <code>./web_server</code> in Terminal, then this page connects automatically.
+</div>
+
+<div class="layout">
+  <div class="panel thread-panel">
+    <div class="panel-title">Thread Pool <span class="badge" id="threadBadge">-- WORKERS</span></div>
+    <div class="threads-grid" id="threadsGrid"></div>
+    <div class="queue-vis">
+      <div class="queue-label"><span>Task Queue</span><span id="queueCount">0 / 32</span></div>
+      <div class="queue-slots" id="queueSlots"></div>
+    </div>
+    <div class="thread-stats">
+      <div class="tstat"><div class="val" id="busyCount">0</div><div class="lbl">Busy</div></div>
+      <div class="tstat"><div class="val" id="idleCount">0</div><div class="lbl">Idle</div></div>
+      <div class="tstat"><div class="val" id="totalReq">0</div><div class="lbl">Total Req</div></div>
+      <div class="tstat"><div class="val" id="rpsVal">0</div><div class="lbl">Req/s</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Request Traffic <span class="badge live" id="liveBadge">LIVE</span></div>
+    <div class="chart-wrap"><canvas id="trafficCanvas"></canvas></div>
+    <div class="chart-legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div>Total req/s</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>200 OK</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>Errors</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>Rate ltd</div>
+    </div>
+    <div class="panel-title" style="margin-top:4px">Request Pipeline <span class="badge" id="latencyBadge">avg --ms</span></div>
+    <div class="flow-stages">
+      <div class="stage" id="stage-accept"><div class="stage-count" id="sc-accept">0</div><div class="stage-name">Accept</div></div>
+      <div class="stage" id="stage-gateway"><div class="stage-count" id="sc-gateway">0</div><div class="stage-name">Gateway</div></div>
+      <div class="stage" id="stage-router"><div class="stage-count" id="sc-router">0</div><div class="stage-name">Router</div></div>
+      <div class="stage" id="stage-handler"><div class="stage-count" id="sc-handler">0</div><div class="stage-name">Handler</div></div>
+      <div class="stage" id="stage-response"><div class="stage-count" id="sc-response">0</div><div class="stage-name">Response</div></div>
+    </div>
+    <div class="packet-lane" id="packetLane"></div>
+  </div>
+
+  <div class="panel gateway-panel">
+    <div class="panel-title">API Gateway <span class="badge">STATELESS</span></div>
+    <div class="gauge-wrap">
+      <div class="gauge-row"><div class="gauge-label">Pool Load</div><div class="gauge-bar"><div class="gauge-fill" id="gPool" style="width:0%;background:linear-gradient(90deg,var(--green),var(--yellow))"></div></div><div class="gauge-val" id="gPoolVal">0%</div></div>
+      <div class="gauge-row"><div class="gauge-label">Active Conn</div><div class="gauge-bar"><div class="gauge-fill" id="gConn" style="width:0%;background:linear-gradient(90deg,var(--accent),var(--green))"></div></div><div class="gauge-val" id="gConnVal">0</div></div>
+      <div class="gauge-row"><div class="gauge-label">Queue Depth</div><div class="gauge-bar"><div class="gauge-fill" id="gQueue" style="width:0%;background:linear-gradient(90deg,var(--orange),var(--red))"></div></div><div class="gauge-val" id="gQueueVal">0</div></div>
+      <div class="gauge-row"><div class="gauge-label">Avg Latency</div><div class="gauge-bar"><div class="gauge-fill" id="gLat" style="width:0%;background:linear-gradient(90deg,var(--accent),var(--orange))"></div></div><div class="gauge-val" id="gLatVal">0ms</div></div>
+    </div>
+    <div class="rate-grid">
+      <div class="rate-card ok"><div class="num" id="stat200">0</div><div class="unit">200 OK</div></div>
+      <div class="rate-card crit"><div class="num" id="stat4xx">0</div><div class="unit">4xx Errors</div></div>
+      <div class="rate-card warn"><div class="num" id="stat429">0</div><div class="unit">Rate Ltd</div></div>
+      <div class="rate-card info"><div class="num" id="stat401">0</div><div class="unit">401 Auth</div></div>
+    </div>
+    <div class="panel-title">Active Clients</div>
+    <table class="ip-table">
+      <thead><tr><th>IP</th><th>Req</th><th>St</th><th>Last Path</th></tr></thead>
+      <tbody id="ipTable"></tbody>
+    </table>
+  </div>
+
+  <div class="panel log-panel">
+    <div class="panel-title">Live Feed <span class="badge" id="logBadge">0 entries</span></div>
+    <div class="log-scroll" id="logScroll"></div>
+  </div>
+</div>
+
+<div class="controls">
+  <span class="ctrl-label">SEND REAL REQUEST:</span>
+  <button class="btn" onclick="sendReal('GET','/health')">GET /health</button>
+  <button class="btn" onclick="sendReal('GET','/api/users')">GET /users</button>
+  <button class="btn" onclick="sendReal('POST','/api/echo','{\"hello\":\"world\"}')">POST /echo</button>
+  <button class="btn" onclick="sendReal('GET','/api/stress?delay_ms=1500')">Slow Request</button>
+  <button class="btn" onclick="sendReal('GET','/not-found')">404 Test</button>
+  <div class="sep"></div>
+  <button class="btn" onclick="burstRequests()">🔥 10x Burst</button>
+  <button class="btn danger" onclick="resetView()">Reset View</button>
+</div>
+
+<script>
+const SERVER = 'http://localhost:8080';
+const CHART_LEN = 60;
+let connected = false, logCount = 0;
+let chartData = {total:[],ok:[],err:[],rl:[]};
+let prev = {total:0,s200:0,s4xx:0,s429:0};
+let pipe = {accept:0,gateway:0,router:0,handler:0,response:0};
+
+function setConnected(state) {
+  connected = state === 'connected';
+  const pill = document.getElementById('statusPill');
+  const text = document.getElementById('statusText');
+  const banner = document.getElementById('connBanner');
+  const badge = document.getElementById('liveBadge');
+  pill.className = 'status-pill ' + state;
+  if (state === 'connected') {
+    text.textContent = 'LIVE · :8080';
+    banner.classList.add('hidden');
+    badge.className = 'badge live'; badge.textContent = 'LIVE';
+  } else if (state === 'disconnected') {
+    text.textContent = 'SERVER OFFLINE';
+    banner.classList.remove('hidden');
+    badge.className = 'badge offline'; badge.textContent = 'OFFLINE';
+  } else {
+    text.textContent = 'CONNECTING…';
+  }
+}
+
+async function pollMetrics() {
+  try {
+    const res = await fetch(SERVER + '/metrics', {signal: AbortSignal.timeout(2000)});
+    if (!res.ok) throw new Error('bad status');
+    const d = await res.json();
+    if (!connected) { setConnected('connected'); addLog('OK','Connected to C++ server at '+SERVER); }
+    applyMetrics(d);
+  } catch(e) {
+    if (connected) addLog('ERROR','Lost connection: '+e.message);
+    setConnected('disconnected');
+  }
+}
+
+function applyMetrics(d) {
+  const s = d.uptime_seconds||0;
+  const h=String(Math.floor(s/3600)).padStart(2,'0'),
+        m=String(Math.floor((s%3600)/60)).padStart(2,'0'),
+        sec=String(s%60).padStart(2,'0');
+  document.getElementById('uptimeVal').textContent=`${h}:${m}:${sec}`;
+
+  setText('totalReq', d.total_requests);
+  setText('rpsVal',   d.rps);
+  setText('stat200',  d.stat_200);
+  setText('stat4xx',  d.stat_4xx);
+  setText('stat429',  d.stat_429);
+  setText('stat401',  d.stat_401);
+  document.getElementById('threadBadge').textContent=(d.num_threads||'?')+' WORKERS';
+  document.getElementById('latencyBadge').textContent='avg '+(d.avg_latency_ms||0)+'ms';
+
+  const threads = d.threads||[];
+  const nt = d.num_threads||threads.length||8;
+  renderThreads(threads, nt);
+  const queued = d.queued_tasks||0;
+  document.getElementById('queueCount').textContent=queued+' / 32';
+  renderQueueSlots(queued);
+  const busy = threads.filter(t=>t.state==='busy').length;
+  setText('busyCount', busy);
+  setText('idleCount', nt-busy);
+
+  const poolPct = nt>0?(busy/nt)*100:0;
+  setGauge('gPool',poolPct,'%','gPoolVal');
+  setGaugeRaw('gConn',Math.min(100,(d.active_conns||0)*10),'gConnVal',(d.active_conns||0),'');
+  setGaugeRaw('gQueue',Math.min(100,queued*5),'gQueueVal',queued,'');
+  setGaugeRaw('gLat',Math.min(100,(d.avg_latency_ms||0)/10),'gLatVal',(d.avg_latency_ms||0),'ms');
+
+  const dt=Math.max(0,(d.total_requests||0)-prev.total),
+        d200=Math.max(0,(d.stat_200||0)-prev.s200),
+        d4xx=Math.max(0,(d.stat_4xx||0)-prev.s4xx),
+        d429=Math.max(0,(d.stat_429||0)-prev.s429);
+  prev={total:d.total_requests||0,s200:d.stat_200||0,s4xx:d.stat_4xx||0,s429:d.stat_429||0};
+  pushChart(d.rps||0, d200, d4xx, d429);
+
+  const tot=d.total_requests||0;
+  pipe.accept=tot; pipe.gateway=tot;
+  pipe.router=tot-(d.stat_429||0);
+  pipe.handler=pipe.router-(d.stat_401||0);
+  pipe.response=d.stat_200||0;
+  ['accept','gateway','router','handler','response'].forEach(n=>{
+    const el=document.getElementById('sc-'+n);
+    if(el) el.textContent=pipe[n]||0;
+  });
+
+  for(let i=0;i<Math.min(dt,4);i++) spawnPacket(['get','get','post','err'][Math.floor(Math.random()*4)]);
+  if(dt>0&&dt<15) {
+    const paths=['/health','/api/users','/api/echo','/'];
+    for(let i=0;i<Math.min(dt,2);i++)
+      addLog('OK','[server] request → 200 OK  '+paths[Math.floor(Math.random()*paths.length)]);
+  } else if(dt>=15) addLog('INFO','[server] '+dt+' requests in last second');
+
+  renderIPTable(d.clients||[]);
+}
+
+function renderThreads(threads, nt) {
+  const grid=document.getElementById('threadsGrid');
+  while(grid.children.length<nt){
+    const el=document.createElement('div');
+    el.innerHTML='<div class="spark"></div><div class="tid"></div><div class="tstate"></div><div class="tpath"></div><div class="progress-bar"></div>';
+    el.className='thread-cell idle'; grid.appendChild(el);
+  }
+  while(grid.children.length>nt) grid.removeChild(grid.lastChild);
+  for(let i=0;i<nt;i++){
+    const c=grid.children[i], t=threads[i]||{id:i,state:'idle',path:'',progress:0};
+    c.className='thread-cell '+(t.state||'idle');
+    c.querySelector('.tid').textContent='T'+String(i).padStart(2,'0');
+    c.querySelector('.tstate').textContent=(t.state||'idle').toUpperCase();
+    c.querySelector('.tpath').textContent=t.path||'';
+    c.querySelector('.progress-bar').style.width=(t.progress||0)+'%';
+  }
+}
+
+function renderQueueSlots(filled){
+  const w=document.getElementById('queueSlots');
+  while(w.children.length<32){const s=document.createElement('div');s.className='queue-slot';w.appendChild(s);}
+  w.querySelectorAll('.queue-slot').forEach((s,i)=>s.classList.toggle('filled',i<filled));
+}
+
+function renderIPTable(clients){
+  const tbody=document.getElementById('ipTable');
+  tbody.innerHTML='';
+  clients.slice(0,8).forEach(c=>{
+    const tr=document.createElement('tr');
+    const sc=c.status==='ok'?'ok':c.status==='rl'?'rl':c.status==='auth'?'auth':'err';
+    tr.innerHTML=`<td>${c.ip}</td><td>${c.count}</td><td><span class="ip-status ${sc}"></span></td><td style="color:var(--subtext)">${c.path||'/'}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// Chart
+const canvas=document.getElementById('trafficCanvas'), ctx=canvas.getContext('2d');
+function resizeCanvas(){canvas.width=canvas.parentElement.offsetWidth;canvas.height=canvas.parentElement.offsetHeight;}
+function pushChart(total,ok,err,rl){
+  const p=(a,v)=>{a.push(v);if(a.length>CHART_LEN)a.shift();};
+  p(chartData.total,total);p(chartData.ok,ok);p(chartData.err,err);p(chartData.rl,rl);
+  drawChart();
+}
+function drawChart(){
+  resizeCanvas();const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='rgba(28,36,48,.8)';ctx.lineWidth=1;
+  for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(0,H/4*i);ctx.lineTo(W,H/4*i);ctx.stroke();}
+  const d=chartData,mv=Math.max(1,...d.total)*1.2;
+  function line(a,color,lw){if(a.length<2)return;ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=lw||1.5;a.forEach((v,i)=>{const x=(i/(CHART_LEN-1))*W,y=H-(v/mv)*H*.9-4;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});ctx.stroke();}
+  function fill(a,color){if(a.length<2)return;ctx.beginPath();a.forEach((v,i)=>{const x=(i/(CHART_LEN-1))*W,y=H-(v/mv)*H*.9-4;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fillStyle=color;ctx.fill();}
+  fill(d.total,'rgba(0,229,255,.05)');
+  line(d.rl,'rgba(255,149,0,.7)');line(d.err,'rgba(255,59,85,.8)');
+  line(d.ok,'rgba(0,255,136,.7)');line(d.total,'rgba(0,229,255,.9)',2);
+}
+
+// Packets
+function spawnPacket(type){
+  const lane=document.getElementById('packetLane');
+  const el=document.createElement('div');
+  const dur=900+Math.random()*600;
+  el.className='packet '+type;el.style.animationDuration=dur+'ms';
+  el.textContent=type==='post'?'POST':type==='err'?'ERR':'GET';
+  lane.appendChild(el);
+  ['accept','gateway','router','handler','response'].forEach((s,i)=>{
+    setTimeout(()=>{const st=document.getElementById('stage-'+s);if(st){st.classList.add('active');setTimeout(()=>st.classList.remove('active'),250);}},( dur/5)*i);
+  });
+  setTimeout(()=>el.remove(),dur+100);
+}
+
+// Helpers
+function setText(id,val){const el=document.getElementById(id);if(el)el.textContent=val;}
+function setGauge(fillId,pct,unit,valId){
+  const f=document.getElementById(fillId),v=document.getElementById(valId);
+  if(f)f.style.width=Math.min(100,Math.max(0,pct))+'%';
+  if(v)v.textContent=Math.round(pct)+(unit||'');
+}
+function setGaugeRaw(fillId,pct,valId,raw,unit){
+  const f=document.getElementById(fillId),v=document.getElementById(valId);
+  if(f)f.style.width=Math.min(100,Math.max(0,pct))+'%';
+  if(v)v.textContent=raw+(unit||'');
+}
+
+// Log
+function addLog(level,msg){
+  logCount++;
+  document.getElementById('logBadge').textContent=logCount+' entries';
+  const scroll=document.getElementById('logScroll');
+  const entry=document.createElement('div');
+  entry.className='log-entry';
+  const now=new Date(),ts=now.toTimeString().slice(0,8)+'.'+String(now.getMilliseconds()).padStart(3,'0');
+  const lc=level==='OK'?'ok':level==='WARN'?'warn':level==='ERROR'?'error':'info';
+  entry.innerHTML=`<span class="log-time">${ts}</span><span class="log-level ${lc}">${level}</span><span class="log-msg">${msg}</span>`;
+  scroll.insertBefore(entry,scroll.firstChild);
+  while(scroll.children.length>100)scroll.removeChild(scroll.lastChild);
+}
+
+// Real requests
+async function sendReal(method,path,body){
+  addLog('INFO','→ '+method+' '+path);
+  try{
+    const opts={method,headers:{'Content-Type':'application/json'}};
+    if(body)opts.body=body;
+    const res=await fetch(SERVER+path,opts);
+    const text=await res.text();
+    addLog(res.ok?'OK':'WARN','← '+res.status+' '+path+'  '+text.slice(0,100));
+    spawnPacket(res.ok?(method==='POST'?'post':'get'):'err');
+  }catch(e){addLog('ERROR','✗ '+path+': '+e.message);}
+}
+
+async function burstRequests(){
+  addLog('INFO','🔥 Sending 10 rapid requests…');
+  const eps=['/health','/api/users','/health','/api/echo','/health','/api/users','/','/','/api/echo','/not-found'];
+  for(const ep of eps){sendReal('GET',ep);await new Promise(r=>setTimeout(r,80));}
+}
+
+function resetView(){
+  chartData={total:[],ok:[],err:[],rl:[]};
+  prev={total:0,s200:0,s4xx:0,s429:0};
+  logCount=0;
+  document.getElementById('logScroll').innerHTML='';
+  drawChart();addLog('INFO','View reset (server counters unchanged)');
+}
+
+setConnected('connecting');
+addLog('INFO','Dashboard started — polling '+SERVER+'/metrics every 1s');
+pollMetrics();
+setInterval(pollMetrics,1000);
+window.addEventListener('resize',drawChart);
+</script>
+</body>
+</html>

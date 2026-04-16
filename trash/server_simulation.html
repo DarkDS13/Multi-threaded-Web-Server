@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pro Server Dashboard</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --border: #334155; 
+    --text: #f8fafc; --muted: #94a3b8; 
+    --blue: #38bdf8; --green: #10b981; --red: #ef4444; --orange: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; padding: 24px; }
+  
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .header h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.5px; }
+  .status-indicator { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; padding: 6px 14px; border-radius: 99px; border: 1px solid var(--border); background: var(--panel); }
+  .status-indicator .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .status-indicator.live .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-indicator.offline .dot { background: var(--red); }
+
+  .grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card h3 { color: var(--muted); font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .card .val { font-size: 32px; font-weight: 700; font-family: ui-monospace, monospace; }
+  .val.blue { color: var(--blue); } .val.green { color: var(--green); } .val.red { color: var(--red); } .val.orange { color: var(--orange); }
+
+  .grid-main { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px; }
+  
+  .chart-container { height: 240px; position: relative; width: 100%; }
+  canvas { width: 100%; height: 100%; display: block; }
+  
+  .thread-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+  .thread { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; transition: all 0.2s; }
+  .thread .tid { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .thread .tpath { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 12px; }
+  .thread.busy { border-color: var(--blue); background: rgba(56, 189, 248, 0.05); }
+  .thread.busy .tid { color: var(--blue); }
+  .thread.busy .tpath { color: var(--blue); }
+
+  .table-container { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; text-align: left; }
+  th { background: rgba(0,0,0,0.2); color: var(--muted); font-size: 12px; font-weight: 500; padding: 12px 20px; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+  td { padding: 12px 20px; font-size: 13px; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; }
+  tr:last-child td { border-bottom: none; }
+  .badge { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .bg-green { background: rgba(16, 185, 129, 0.15); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.3); }
+  .bg-red { background: rgba(239, 68, 68, 0.15); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3); }
+  .bg-blue { background: rgba(56, 189, 248, 0.15); color: var(--blue); border: 1px solid rgba(56, 189, 248, 0.3); }
+  .bg-orange { background: rgba(245, 158, 11, 0.15); color: var(--orange); border: 1px solid rgba(245, 158, 11, 0.3); }
+
+  .actions { display: flex; gap: 12px; margin-top: 24px; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--border); padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: 0.2s; }
+  button:hover { background: var(--border); }
+  button.primary { background: var(--blue); color: #0f172a; border: none; font-weight: 600; }
+  button.primary:hover { background: #7dd3fc; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>C++ Server Diagnostics</h1>
+    <div style="color: var(--muted); font-size: 13px; margin-top: 4px;">Uptime: <span id="uptime">0s</span></div>
+  </div>
+  <div id="statusIndicator" class="status-indicator offline">
+    <div class="dot"></div> <span id="statusText">Connecting...</span>
+  </div>
+</div>
+
+<div class="grid-stats">
+  <div class="card"><h3>Req / Sec</h3><div class="val blue" id="rps">0</div></div>
+  <div class="card"><h3>Active Conns</h3><div class="val orange" id="activeConns">0</div></div>
+  <div class="card"><h3>Avg Latency</h3><div class="val orange" id="latency">0ms</div></div>
+  <div class="card"><h3>200 OK</h3><div class="val green" id="successReq">0</div></div>
+  <div class="card"><h3>Errors / Blocked</h3><div class="val red" id="errorReq">0</div></div>
+</div>
+
+<div class="grid-main">
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <h3>Live Traffic Overview</h3>
+      <div style="font-size: 11px; color: var(--muted); display: flex; gap: 12px;">
+        <span style="color: var(--blue)">■ Total</span>
+        <span style="color: var(--green)">■ Success</span>
+        <span style="color: var(--red)">■ Errors</span>
+      </div>
+    </div>
+    <div class="chart-container"><canvas id="trafficChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between;">
+      <h3>Thread Pool</h3>
+      <span style="font-size: 12px; color: var(--muted);" id="queueDepth">Queue: 0</span>
+    </div>
+    <div id="threadGrid" class="thread-grid"></div>
+  </div>
+</div>
+
+<div class="table-container">
+  <table>
+    <thead><tr><th>Client IP Address</th><th>Total Requests</th><th>Last Requested Path</th><th>Status</th></tr></thead>
+    <tbody id="clientTable"></tbody>
+  </table>
+</div>
+
+<div class="actions">
+  <button class="primary" onclick="ping('/health')">Ping /health</button>
+  <button onclick="ping('/api/users')">Fetch Users</button>
+  <button onclick="ping('/api/stress?delay_ms=800')">Slow Request (800ms)</button>
+  <button onclick="burst()">🔥 Trigger Burst (10x)</button>
+</div>
+
+<script>
+  const SERVER = 'http://localhost:8080';
+  const CHART_LEN = 40;
+  let history = { total: Array(CHART_LEN).fill(0), ok: Array(CHART_LEN).fill(0), err: Array(CHART_LEN).fill(0) };
+  let prev = { total: 0, ok: 0, err: 0 };
+  
+  const canvas = document.getElementById('trafficChart');
+  const ctx = canvas.getContext('2d');
+
+  function resizeCanvas() {
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  function drawChart() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.width, h = canvas.height;
+    const maxVal = Math.max(10, ...history.total) * 1.2;
+
+    function drawLine(data, color, fillOpacity) {
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      data.forEach((val, i) => {
+        const x = (i / (CHART_LEN - 1)) * w;
+        const y = h - ((val / maxVal) * h);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      if (fillOpacity) {
+        ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+        ctx.fillStyle = color.replace(')', `, ${fillOpacity})`).replace('rgb', 'rgba');
+        ctx.fill();
+      }
+    }
+
+    drawLine(history.total, 'rgb(56, 189, 248)', 0.1); 
+    drawLine(history.ok, 'rgb(16, 185, 129)', 0);      
+    drawLine(history.err, 'rgb(239, 68, 68)', 0);      
+  }
+
+  function updateThreads(threads, count) {
+    const grid = document.getElementById('threadGrid');
+    if (grid.children.length !== count) {
+      grid.innerHTML = '';
+      for (let i=0; i<count; i++) {
+        grid.innerHTML += `<div class="thread" id="t-${i}"><div class="tid">Worker ${i}</div><div class="tpath" id="tp-${i}">IDLE</div></div>`;
+      }
+    }
+    threads.forEach(t => {
+      const el = document.getElementById(`t-${t.id}`);
+      const pathEl = document.getElementById(`tp-${t.id}`);
+      if (el) {
+        if (t.state === 'busy') {
+          el.className = 'thread busy';
+          pathEl.textContent = t.path || 'PROCESSING';
+        } else {
+          el.className = 'thread';
+          pathEl.textContent = 'IDLE';
+        }
+      }
+    });
+  }
+
+  function updateClientTable(clients) {
+    const tbody = document.getElementById('clientTable');
+    tbody.innerHTML = '';
+    
+    if (!clients || clients.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--muted)">No active clients</td></tr>';
+      return;
+    }
+
+    clients.forEach(c => {
+      let badgeClass = 'bg-blue';
+      if (c.status === 'ok') badgeClass = 'bg-green';
+      else if (c.status === 'rl') badgeClass = 'bg-orange';
+      else if (c.status === 'err' || c.status === 'auth') badgeClass = 'bg-red';
+
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td style="color: var(--blue)">${c.ip}</td>
+        <td>${c.count.toLocaleString()}</td>
+        <td>${c.path}</td>
+        <td><span class="badge ${badgeClass}">${c.status}</span></td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch(SERVER + '/metrics', { signal: AbortSignal.timeout(1500) });
+      const data = await res.json();
+      
+      const ind = document.getElementById('statusIndicator');
+      ind.className = 'status-indicator live';
+      document.getElementById('statusText').textContent = 'Live • Port 8080';
+
+      document.getElementById('uptime').textContent = data.uptime_seconds + 's';
+      document.getElementById('rps').textContent = data.rps;
+      document.getElementById('activeConns').textContent = data.active_conns;
+      document.getElementById('latency').textContent = data.avg_latency_ms + 'ms';
+      document.getElementById('successReq').textContent = data.stat_200.toLocaleString();
+      
+      const errors = data.stat_4xx + data.stat_429 + data.stat_500;
+      document.getElementById('errorReq').textContent = errors.toLocaleString();
+      document.getElementById('queueDepth').textContent = `Queue: ${data.queued_tasks}`;
+
+      // Chart Data
+      const curTotal = data.total_requests;
+      const curOk = data.stat_200;
+      const curErr = errors;
+      
+      history.total.push(Math.max(0, curTotal - prev.total)); history.total.shift();
+      history.ok.push(Math.max(0, curOk - prev.ok));       history.ok.shift();
+      history.err.push(Math.max(0, curErr - prev.err));     history.err.shift();
+      
+      prev = { total: curTotal, ok: curOk, err: curErr };
+      drawChart();
+      updateThreads(data.threads || [], data.num_threads || 8);
+      
+      // Update the live clients table
+      updateClientTable(data.clients);
+
+    } catch (e) {
+      document.getElementById('statusIndicator').className = 'status-indicator offline';
+      document.getElementById('statusText').textContent = 'Connection Lost';
+    }
+  }
+
+  async function ping(path) {
+    try { await fetch(SERVER + path); } catch(e) {}
+  }
+
+  async function burst() {
+    for(let i=0; i<10; i++) { ping('/health'); await new Promise(r => setTimeout(r, 50)); }
+  }
+
+  setInterval(poll, 100);
+  poll();
+</script>
+</body>
+</html>

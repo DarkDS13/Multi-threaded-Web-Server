@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Temporary directories (uncomment if you want to ignore them)
+# trash/
+# a/
