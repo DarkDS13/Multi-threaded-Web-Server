@@ -5,7 +5,8 @@
 *.zip
 *.tar.gz
 *.rar
-
+files/
+files1/
 # Temporary directories (uncomment if you want to ignore them)
-# trash/
+trash/
 # a/
