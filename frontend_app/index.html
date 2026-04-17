@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus Smart City - Dynamic Traffic Controller</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Login Modal Overlay -->
+  <div id="loginOverlay" class="overlay active">
+    <div class="login-box glass-panel">
+      <div class="logo">
+        <div class="logo-icon">▲</div>
+        <h1>NEXUS</h1>
+      </div>
+      <h2>Traffic Authority Login</h2>
+      <p>Enter your designation to access the smart city network.</p>
+      <input type="text" id="usernameInput" placeholder="Designation (e.g. civilian / ambulance)" value="civilian" />
+      <button id="loginBtn" class="btn primary-btn">Request Token</button>
+      <div id="loginStatus" class="status-msg"></div>
+    </div>
+  </div>
+
+  <!-- Main Application -->
+  <div id="appContainer" class="app-container hidden">
+    <!-- Header -->
+    <header class="glass-panel main-header">
+      <div class="header-left">
+        <div class="logo-icon small">▲</div>
+        <div class="header-title">
+          <h2>Nexus Smart City</h2>
+          <span>Central Traffic Controller Node</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="user-badge" id="userBadge">
+          <span class="role-icon">👤</span>
+          <span id="roleText">CIVILIAN</span>
+        </div>
+        <div class="connection-status connected">
+          <div class="dot"></div>
+          <span>Server Active</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="dashboard-layout">
+      <!-- Left Panel: Controls & Authority -->
+      <aside class="glass-panel sidebar">
+        <div class="panel-section">
+          <h3>Traffic Injector</h3>
+          <p class="section-desc">Spawn heavy traffic bursts to test junction load balancing.</p>
+          
+          <div class="control-grid">
+            <button class="btn lane-btn" data-road="0">Northbound Surge</button>
+            <button class="btn lane-btn" data-road="2">Southbound Surge</button>
+            <button class="btn lane-btn" data-road="1">Westbound Surge</button>
+            <button class="btn lane-btn" data-road="3">Eastbound Surge</button>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3>Emergency Dispatch</h3>
+          <p class="section-desc">Spawn an ambulance. As an emergency vehicle, its requests automatically override civilian votes.</p>
+          <button id="spawnAmbulanceBtn" class="btn warning-btn">🚨 Dispatch Ambulance</button>
+        </div>
+
+        <div class="panel-section">
+          <h3>VIP Controls (Dijkstra)</h3>
+          <p class="section-desc">Spawn a VIP civilian that uses graph pathfinding to circumvent heavy congestion.</p>
+          <button id="spawnVipBtn" class="btn warning-btn" style="border-color: #ff00ff; color: #ff00ff; background: rgba(255, 0, 255, 0.1); margin-bottom: 8px;">💠 Dispatch VIP</button>
+          <button id="vipOverrideBtn" class="btn lane-btn">Override Nearest Light</button>
+        </div>
+
+        <div class="panel-section">
+          <h3>System Metrics</h3>
+          <div class="metrics-grid">
+            <div class="metric">
+              <span class="metric-label">Active Cars</span>
+              <span class="metric-val" id="mCars">0</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Total Civ. Votes</span>
+              <span class="metric-val" id="mVotes">0</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Overrides Executed</span>
+              <span class="metric-val" id="mOverrides">0</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center Panel: The Visualizer -->
+      <main class="center-stage">
+        <canvas id="trafficCanvas"></canvas>
+        <div class="canvas-overlay-text">
+          <span id="activeLightInd" class="light-indicator">JUNCTIONS ONLINE: 4</span>
+        </div>
+      </main>
+
+      <!-- Right Panel: Live Server Feed -->
+      <aside class="glass-panel sidebar right-sidebar">
+        <div class="panel-section full-height">
+          <h3>Live Server Feed</h3>
+          <p class="section-desc">Real-time C++ Backend Activity (POST /api/echo)</p>
+          <div class="terminal-log" id="terminalLog">
+            <!-- Logs spawn here -->
+            <div class="log-entry sys-msg">System Initialized. Awaiting connections...</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
