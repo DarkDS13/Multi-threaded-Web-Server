@@ -98,23 +98,80 @@ function logTerminal(msg, isTx = false, isOverride = false) {
   if(terminalLog.children.length > 50) terminalLog.removeChild(terminalLog.firstChild);
 }
 
-async function sendInfluenceCommand(junctionId, lane, isEmergency = false, commandName = "VOTE_GREEN") {
-  const payload = {
-    role: userRole,
-    junction_id: junctionId,
-    command: isEmergency ? "AUTOSCALE_GREEN" : commandName,
-    influenced_axis: lane
-  };
-  
-  logTerminal(`/api/echo - ${JSON.stringify(payload)}`, true, isEmergency);
-  
-  try {
-    fetch(SERVER + '/api/echo', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    }).then(res => res.json()).then(parsed => logTerminal(`ACK - ${JSON.stringify(parsed.body)}`));
-  } catch (err) {}
+// Global Sync Mechanism
+let lastEventId = -1;
+
+async function broadcastEvent(eventData) {
+    try {
+        logTerminal(`/api/events - ${JSON.stringify(eventData.action)}`, true);
+        await fetch(SERVER + '/api/events', {
+            method: 'POST',
+            body: JSON.stringify(eventData)
+        });
+    } catch(e) {}
 }
+
+async function pollGlobalEvents() {
+    try {
+        const res = await fetch(`${SERVER}/api/events?since=${lastEventId}`);
+        const events = await res.json();
+        for (let ev of events) {
+            if (ev.id > lastEventId) lastEventId = ev.id;
+            handleGlobalEvent(ev.payload);
+        }
+    } catch(e) {}
+    setTimeout(pollGlobalEvents, 500);
+}
+
+function handleGlobalEvent(payload) {
+    try {
+        // Handle case where body is sent as string or object
+        if (typeof payload === 'string') payload = JSON.parse(payload);
+    } catch(e) { return; }
+
+    if (payload.action === 'SPAWN_AMBULANCE') {
+        vehicles.push(new Vehicle('ambulance'));
+        logTerminal(`[SYNC] Ambulance Dispatched`, false);
+    }
+    else if (payload.action === 'SPAWN_VIP') {
+        let pStart = payload.start || 'NW';
+        let pEnd = payload.end || 'SE';
+        activeVipRoute = runDijkstra(pStart, pEnd);
+        let vip = new Vehicle('vip');
+        
+        if (pStart === 'NW') { vip.x = cw/3 - 15; vip.y = -50; vip.dir = 0; }
+        else if (pStart === 'SW') { vip.x = -50; vip.y = ch*2/3 + 15; vip.dir = 3; }
+        else if (pStart === 'SE') { vip.x = cw*2/3 + 15; vip.y = ch + 50; vip.dir = 2; }
+        else if (pStart === 'NE') { vip.x = cw + 50; vip.y = ch/3 - 15; vip.dir = 1; }
+        
+        vip.route = [...activeVipRoute];
+        if (pEnd === 'NW') vip.vipExitDir = 2; // North
+        else if (pEnd === 'SW') vip.vipExitDir = 1; // West
+        else if (pEnd === 'SE') vip.vipExitDir = 0; // South
+        else if (pEnd === 'NE') vip.vipExitDir = 3; // East
+
+        vehicles.push(vip);
+        logTerminal(`[SYNC] VIP Routing: ${pStart} -> ${pEnd}`, false);
+    }
+    else if (payload.action === 'VIP_HACK_OVERRIDE') {
+        let j = junctions.find(jx => jx.id === payload.j_id);
+        if (j) {
+            j.state = payload.state;
+            j.override = true;
+            j.timer = 0; // Reset standard timer to extend
+            logTerminal(`[SYNC] VIP Hacker Override -> ${j.id}`, false, true);
+        }
+    }
+    else if (payload.action === 'INJECT_TRAFFIC_BURST') {
+        for (let i=0; i<6; i++) {
+            setTimeout(() => { vehicles.push(new Vehicle('civilian', payload.dir)); }, i * 400);
+        }
+        logTerminal(`[SYNC] Traffic Surge Injected`, false);
+    }
+}
+
+// Start polling immediately
+pollGlobalEvents();
 
 // === ENTITIES ===
 const vehicles = [];
@@ -190,9 +247,15 @@ class Vehicle {
                         if (this.dir === 3) this.y = nextJ.cy + 15;
                     }
                 } else {
-                    // Reached final junction, proceed straight to exit bounds
-                    this.dir = 0; 
-                    this.w = 12; this.h = 22;
+                    // Reached final junction loop bounds, proceed out to specific exit pseudo-lane
+                    this.dir = this.vipExitDir !== undefined ? this.vipExitDir : 0; 
+                    this.w = (this.dir === 1 || this.dir === 3) ? 22 : 12; 
+                    this.h = (this.dir === 1 || this.dir === 3) ? 12 : 22;
+                    
+                    if (this.dir === 0) this.x = nextJ.cx - 15;
+                    if (this.dir === 2) this.x = nextJ.cx + 15;
+                    if (this.dir === 1) this.y = nextJ.cy - 15;
+                    if (this.dir === 3) this.y = nextJ.cy + 15;
                 }
             }
         }
@@ -335,26 +398,20 @@ document.querySelectorAll('.lane-btn').forEach(btn => {
   btn.addEventListener('click', () => {
      if(btn.id === 'vipOverrideBtn') return; // skip
      let dir = parseInt(btn.dataset.road);
-     sendInfluenceCommand("MAP_WIDE", ['NS','EW','NS','EW'][dir], false, "INJECT_TRAFFIC_BURST");
-     for (let i=0; i<6; i++) {
-        setTimeout(() => { vehicles.push(new Vehicle('civilian', dir)); }, i * 400);
-     }
+     broadcastEvent({ action: "INJECT_TRAFFIC_BURST", dir: dir });
   });
 });
 
 document.getElementById('spawnAmbulanceBtn').addEventListener('click', () => {
-    vehicles.push(new Vehicle('ambulance'));
+    broadcastEvent({ action: "SPAWN_AMBULANCE" });
 });
 
 document.getElementById('spawnVipBtn').addEventListener('click', () => {
-    // Dijkstra dynamically picks route from NW edge to SE edge
-    activeVipRoute = runDijkstra('NW', 'SE');
-    let vip = new Vehicle('vip');
-    vip.x = cw/3 - 15; // NW Entry point
-    vip.y = -50;
-    vip.dir = 0;
-    vip.route = [...activeVipRoute];
-    vehicles.push(vip);
+    let nodes = ['NW','NE','SW','SE'];
+    let start = nodes[Math.floor(Math.random()*4)];
+    let end = nodes[Math.floor(Math.random()*4)];
+    while(start === end) end = nodes[Math.floor(Math.random()*4)];
+    broadcastEvent({ action: "SPAWN_VIP", start: start, end: end });
 });
 
 document.getElementById('vipOverrideBtn').addEventListener('click', () => {
@@ -367,8 +424,7 @@ document.getElementById('vipOverrideBtn').addEventListener('click', () => {
         }
         if (closestJ) {
             let pState = (vip.dir === 0 || vip.dir === 2) ? 'NS' : 'EW';
-            closestJ.state = pState; // Force local override
-            sendInfluenceCommand(closestJ.id, pState, true, "VIP_HACK_OVERRIDE");
+            broadcastEvent({ action: "VIP_HACK_OVERRIDE", j_id: closestJ.id, state: pState });
         }
     } else {
         alert("No VIP vehicle detected on the grid.");
@@ -408,7 +464,7 @@ function renderLoop() {
           let pState = (closestAmbulance.dir === 0 || closestAmbulance.dir === 2) ? 'NS' : 'EW';
           if (j.state !== pState) {
               j.state = pState;
-              if (userRole === 'ambulance' || userRole === 'admin') sendInfluenceCommand(j.id, pState, true);
+              // We do not broadcast ambient Green Waves. They auto-compute on all clients simultaneously because the Ambulance object is perfectly synchronized!
           }
       }
       
@@ -468,39 +524,70 @@ function renderLoop() {
       ctx.beginPath();
       
       let n0 = junctions.find(j => j.id === activeVipRoute[0]);
-      ctx.moveTo(n0.cx - 15, 0); 
+      if (n0) {
+          if (n0.id === 'NW') ctx.moveTo(n0.cx - 15, 0); 
+          else if (n0.id === 'SW') ctx.moveTo(0, n0.cy + 15); 
+          else if (n0.id === 'SE') ctx.moveTo(n0.cx + 15, ch);
+          else if (n0.id === 'NE') ctx.moveTo(cw, n0.cy - 15);
+      }
       
       for (let i=0; i<activeVipRoute.length; i++) {
           let j = junctions.find(jx => jx.id === activeVipRoute[i]);
+          if (!j) continue;
           let nextJ = i < activeVipRoute.length - 1 ? junctions.find(jx => jx.id === activeVipRoute[i+1]) : null;
           let prevJ = i > 0 ? junctions.find(jx => jx.id === activeVipRoute[i-1]) : null;
           
           let enterDir = 0; // Default North->South
           if (prevJ) {
               if (prevJ.cx < j.cx) enterDir = 3; // West->East
+              else if (prevJ.cy > j.cy) enterDir = 2; // South->North
+              else if (prevJ.cx > j.cx) enterDir = 1; // East->West
+          } else if (n0) {
+              // Assume enter dir based on initial start boundary logic
+              if (n0.id === 'SW') enterDir = 3;
+              else if (n0.id === 'SE') enterDir = 2;
+              else if (n0.id === 'NE') enterDir = 1;
           }
           
           let exitDir = 0; // Default exit South
           if (nextJ) {
               if (nextJ.cx > j.cx) exitDir = 3; // West->East
+              else if (nextJ.cy < j.cy) exitDir = 2; // South->North
+              else if (nextJ.cx < j.cx) exitDir = 1; // East->West
+          } else {
+              // Assume exit dir based on final end boundary logic
+              let jL = activeVipRoute[activeVipRoute.length-1];
+              if (jL === 'NW') exitDir = 2;
+              else if (jL === 'SW') exitDir = 1;
+              else if (jL === 'NE') exitDir = 3;
           }
           
-          // Draw connecting vectors through the intersection box
-          if (enterDir === 0 && exitDir === 0) {
-              ctx.lineTo(j.cx - 15, j.cy + 15);
-          } else if (enterDir === 0 && exitDir === 3) {
-              ctx.lineTo(j.cx - 15, j.cy + 15); // Drive south into intersection
-              ctx.lineTo(j.cx, j.cy + 15);      // Turn East
-          } else if (enterDir === 3 && exitDir === 0) {
-              ctx.lineTo(j.cx - 15, j.cy + 15); // Drive east into intersection then turn South
-          } else if (enterDir === 3 && exitDir === 3) {
-              ctx.lineTo(j.cx + 15, j.cy + 15);
+          // Draw connecting vectors through the intersection box based on enter/exit combos
+          // This ensures perfect 90 degree bends exactly like the Vehicle collision mechanics
+          let inX = j.cx + (enterDir===2?15 : enterDir===0?-15 : 0);
+          let inY = j.cy + (enterDir===1?-15 : enterDir===3?15 : 0);
+          
+          let outX = j.cx + (exitDir===2?15 : exitDir===0?-15 : 0);
+          let outY = j.cy + (exitDir===1?-15 : exitDir===3?15 : 0);
+          
+          ctx.lineTo(inX, inY); // Enter bounding box
+          if (enterDir !== exitDir && (enterDir%2 !== exitDir%2)) {
+             // 90 Deg turn: Match inner vertex to prevent diagonal cuts
+             if (enterDir === 0 || enterDir === 2) ctx.lineTo(inX, outY);
+             else ctx.lineTo(outX, inY);
           }
+          ctx.lineTo(outX, outY); // Queue Exit
       }
       
-      // Final segment to southern exit
+      // Final segment to randomized exterior bound
       let jLast = junctions.find(jx => jx.id === activeVipRoute[activeVipRoute.length-1]);
-      ctx.lineTo(jLast.cx - 15, ch);
+      if (jLast) {
+          if (jLast.id === 'SE') ctx.lineTo(jLast.cx - 15, ch);
+          else if (jLast.id === 'NE') ctx.lineTo(cw, jLast.cy + 15);
+          else if (jLast.id === 'NW') ctx.lineTo(jLast.cx + 15, 0);
+          else if (jLast.id === 'SW') ctx.lineTo(0, jLast.cy - 15);
+      }
+      
       ctx.stroke();
   }
   

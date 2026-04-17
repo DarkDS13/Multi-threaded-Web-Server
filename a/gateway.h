@@ -100,8 +100,8 @@ public:
         auto req_id = next_request_id();
 
         // 1. Rate limiting
-        // 1. Rate limiting (Whitelist the dashboard metrics)
-        if (req.path != "/metrics" && req.method != "OPTIONS" && !rate_limiter_.allow(client_ip)) {
+        // 1. Rate limiting (Whitelist the dashboard metrics and multiplayer heartbeat)
+        if (req.path != "/metrics" && req.path != "/api/events" && req.method != "OPTIONS" && !rate_limiter_.allow(client_ip)) {
             auto r = HttpResponse::make_error(429, "Too Many Requests");
             inject_common_headers(r, req_id);
             return r;
