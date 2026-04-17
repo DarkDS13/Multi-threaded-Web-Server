@@ -7,8 +7,19 @@
 #include <csignal>
 #include <sstream>
 #include <chrono>
+#include <chrono>
+#include <mutex>
+#include <vector>
 
 Server* g_server = nullptr;
+
+struct GameEvent {
+    int id;
+    std::string payload; // Raw JSON string
+};
+std::mutex g_events_mutex;
+std::vector<GameEvent> g_events;
+int g_next_event_id = 0;
 void signal_handler(int) {
     std::cout << "\n[INFO ] Shutting down gracefully...\n";
     if (g_server) { g_server->print_stats(); g_server->stop(); }
@@ -68,6 +79,53 @@ void register_routes(Router& router) {
         auto token = TokenValidator::generate(user);
         return HttpResponse::make_json(200,
             "{\"token\":\""+token+"\",\"expires_in\":3600,\"user\":\""+user+"\"}");
+    });
+
+    // ── MULTIPLAYER SYNCHRONIZATION ENDPOINTS ──
+    router.add_route("GET", "/api/events", [](const HttpRequest& req) {
+        int since_id = -1;
+        auto pos = req.query_params.find("since");
+        if (pos != req.query_params.end()) since_id = std::stoi(pos->second);
+        
+        std::lock_guard<std::mutex> lock(g_events_mutex);
+        std::ostringstream o;
+        o << "[";
+        bool first = true;
+        for (const auto& ev : g_events) {
+            if (ev.id > since_id) {
+                if (!first) o << ",";
+                o << "{\"id\":" << ev.id << ",\"payload\":" << ev.payload << "}";
+                first = false;
+            }
+        }
+        o << "]";
+        auto resp = HttpResponse::make_json(200, o.str());
+        resp.headers["Access-Control-Allow-Origin"] = "*";
+        return resp;
+    });
+
+    router.add_route("POST", "/api/events", [](const HttpRequest& req) {
+        std::lock_guard<std::mutex> lock(g_events_mutex);
+        GameEvent ev;
+        ev.id = ++g_next_event_id;
+        ev.payload = req.body.empty() ? "{}" : req.body;
+        g_events.push_back(ev);
+        
+        if (g_events.size() > 500) {
+            g_events.erase(g_events.begin(), g_events.begin() + 100);
+        }
+        
+        auto resp = HttpResponse::make_json(201, "{\"status\":\"ok\"}");
+        resp.headers["Access-Control-Allow-Origin"] = "*";
+        return resp;
+    });
+
+    router.add_route("OPTIONS", "/api/events", [](const HttpRequest&) {
+        HttpResponse r; r.status_code = 204; r.status_text = "No Content";
+        r.headers["Access-Control-Allow-Origin"]  = "*";
+        r.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+        r.headers["Access-Control-Allow-Headers"] = "Content-Type";
+        return r;
     });
 
     router.add_route("GET", "/api/users", [](const HttpRequest&) {
